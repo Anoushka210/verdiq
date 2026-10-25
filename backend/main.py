@@ -111,7 +111,7 @@ def get_gemini_explanation(parameter, location, value, mean, zscore, lower, uppe
 
     return (
         f"This reading of {value} µg/m³ represents a {severity} {direction} of {deviation} µg/m³ "
-        f"above the local rolling mean of {mean} µg/m³, with a z-score of {zscore} — "
+        f"above the local rolling mean of {mean} µg/m³, with a  z-scoreof {round(zscore, 3)} — "
         f"statistically unusual at {abs(zscore):.1f} standard deviations from expected values. "
         f"The IQR-based bounds for this batch are {lower}–{upper} µg/m³, placing this reading "
         f"well outside the normal range. {pollutant_context} "
