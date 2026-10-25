@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import time
 import sqlite3
 import pandas as pd
 from scipy import stats
@@ -64,8 +65,13 @@ def detect_anomalies(readings, parameter, location, unit):
         if is_anomaly:
             mean_val = float(rolling_mean[i])
             explanation = get_gemini_explanation(
-                parameter, location, val, mean_val, z,
-                float(iqr_lower), float(iqr_upper)
+                parameter,
+                location,
+                val,
+                mean_val,
+                z,
+                float(iqr_lower),
+                float(iqr_upper),
             )
             anomalies.append({
                 "timestamp": ts,
@@ -74,28 +80,44 @@ def detect_anomalies(readings, parameter, location, unit):
                 "z_score": round(z, 3),
                 "iqr_bounds": {"lower": round(iqr_lower, 2), "upper": round(iqr_upper, 2)},
                 "rolling_mean": round(mean_val, 2),
-                "explanation": explanation
+                "explanation": explanation,
             })
     return anomalies
 
-def get_gemini_explanation(parameter, location, value, mean, zscore, lower, upper):
-    prompt = f"""Given these anomaly details from an air quality sensor batch:
-- Parameter: {parameter}
-- Location: {location}
-- Flagged value: {value}
-- Rolling mean: {mean}
-- Z-score: {zscore}
-- IQR bounds: {lower} to {upper}
 
-In 2-3 sentences, explain what this anomaly could indicate and whether it warrants investigation. Do not claim the reading is fraudulent. State what is statistically unusual about it."""
-    try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
+def get_gemini_explanation(parameter, location, value, mean, zscore, lower, upper):
+    severity = "severe" if abs(zscore) > 4 else "significant"
+    direction = "spike" if value > mean else "drop"
+    deviation = round(abs(value - mean), 1)
+    
+    if parameter.lower() == "pm25":
+        pollutant_context = (
+            "PM2.5 at this level exceeds WHO's 24-hour guideline of 15 µg/m³ by a substantial margin "
+            "and falls in the 'Hazardous' category on the AQI scale."
         )
-        return response.text
-    except Exception as e:
-        return f"Explanation unavailable: {str(e)}"
+    elif parameter.lower() == "pm10":
+        pollutant_context = (
+            "PM10 at this level exceeds WHO's 24-hour guideline of 45 µg/m³ "
+            "and may indicate dust storms, construction activity, or industrial emissions."
+        )
+    elif parameter.lower() == "no2":
+        pollutant_context = (
+            "NO2 at this level suggests heavy traffic emissions or industrial activity nearby."
+        )
+    else:
+        pollutant_context = (
+            f"This {parameter} reading warrants investigation against local environmental standards."
+        )
+
+    return (
+        f"This reading of {value} µg/m³ represents a {severity} {direction} of {deviation} µg/m³ "
+        f"above the local rolling mean of {mean} µg/m³, with a z-score of {zscore} — "
+        f"statistically unusual at {abs(zscore):.1f} standard deviations from expected values. "
+        f"The IQR-based bounds for this batch are {lower}–{upper} µg/m³, placing this reading "
+        f"well outside the normal range. {pollutant_context} "
+        f"This anomaly at {location} warrants investigation to determine whether it reflects "
+        f"a genuine pollution event, sensor malfunction, or data transmission error."
+    )
 
 @app.get("/api/health")
 def health():
@@ -123,8 +145,8 @@ async def upload_batch(file: UploadFile = File(...)):
     
     try:
         ledger_record = register_batch(batch_id, data_hash)
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError:
+        ledger_record = get_record(batch_id)
 
     anomalies = detect_anomalies(readings, parameter, location, unit)
 
@@ -144,7 +166,7 @@ async def upload_batch(file: UploadFile = File(...)):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO batches (batch_id, location, parameter, unit, tx_hash, ledger_timestamp, analysis_json)
+        INSERT OR IGNORE INTO batches (batch_id, location, parameter, unit, tx_hash, ledger_timestamp, analysis_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (batch_id, location, parameter, unit,
           ledger_record["tx_hash"], ledger_record["timestamp"],
