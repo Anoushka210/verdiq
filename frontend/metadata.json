@@ -1,0 +1,6 @@
+{
+  "name": "Verdiq",
+  "description": "AI-assisted environmental data integrity platform ensuring telemetry plausibility and cryptographic ledger provenance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
